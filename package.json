@@ -1,0 +1,11 @@
+{
+  "name": "cassiopea-query",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "run": "node index.js"
+  },
+  "dependencies": {
+    "ton-client-node-js": "^0.21.0"
+  }
+}
