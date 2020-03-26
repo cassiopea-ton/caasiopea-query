@@ -131,6 +131,100 @@ class DataDeserializer {
     }
     return cells;
   }
+
+  static readBits(data, bitIndex, counter) {
+    let dataSlice = data.readUIntBE(~~(bitIndex / 8), ~~(counter / 8) + 1);
+    let mask = 0;
+    let bitStart = bitIndex % 8;
+    for (let i = 0; i < counter; i++) {
+      mask |= 1 << (~~(bitIndex / 8) * 8 + 7 - (bitIndex % 8) - i);
+    }
+    return (dataSlice & mask) >> (8 - (bitIndex % 8) - counter);
+  }
+
+  static getLabel() {}
+
+  static deserializeDict(dictData, data, keyLength) {
+    let bitOffset = 0;
+    let dict = {};
+    let b,
+      label,
+      nodeLength = keyLength,
+      labelLength = 0;
+    let referencesOffset = 0;
+    // readLabel
+    if (!DataDeserializer.readBits(dictData.data, bitOffset++, 1)) {
+      // short
+      while (DataDeserializer.readBits(dictData.data, bitOffset++, 1)) {
+        labelLength++;
+      }
+      label = DataDeserializer.readBits(dictData.data, bitOffset, labelLength);
+      bitOffset += labelLength;
+    } else if (DataDeserializer.readBits(dictData.data, bitOffset++, 1)) {
+      // same
+      b = DataDeserializer.readBits(dictData.data, bitOffset++, 1);
+      labelLength = DataDeserializer.readBits(
+        dictData.data,
+        bitOffset,
+        Math.ceil(Math.log2(nodeLength + 1))
+      );
+      bitOffset += Math.ceil(Math.log2(nodeLength + 1));
+      label = 0;
+      for (let i = 0; i < labelLength; i++) {
+        label |= b << (labelLength - 1 - i);
+      }
+    } else {
+      // long
+      labelLength = DataDeserializer.readBits(
+        dictData.data,
+        bitOffset,
+        Math.ceil(Math.log2(nodeLength + 1))
+      );
+      bitOffset += Math.ceil(Math.log2(nodeLength + 1));
+      label = DataDeserializer.readBits(dictData.data, bitOffset, labelLength);
+      bitOffset += labelLength;
+    }
+    nodeLength -= labelLength;
+    if (!nodeLength) {
+      if (DataDeserializer.readBits(dictData.data, bitOffset++, 1)) {
+        dict[label] = data[dictData.references[referencesOffset++]];
+      }
+    }
+    console.log(label, "\n", labelLength, "\n");
+    // readNode
+
+    return dict;
+  }
+
+  static deserializeData(data, rootIdx, abi) {
+    let offset = 0;
+    let bitOffset = 0;
+    let refOffset = 0;
+    let struct = [];
+    let root = data[rootIdx];
+    abi.forEach((item, index) => {
+      switch (item.type) {
+        case "dict":
+          let hme = root.data[Math.floor(bitOffset++ / 8)];
+          if (hme) {
+            struct.push(
+              DataDeserializer.deserializeDict(
+                data[root.references[refOffset++]],
+                data,
+                item.keys.length
+              )
+            );
+          } else {
+            struct.push({});
+          }
+          break;
+        case "grams":
+          break;
+      }
+    });
+
+    return struct;
+  }
 }
 
 async function main(client) {
@@ -140,7 +234,29 @@ async function main(client) {
   const account = await queryClient.getAccount(registerAddr);
 
   const buffer = Buffer.from(account[0].data, "base64");
-  console.log(DataDeserializer.deserializeBoc(buffer));
+  let contractStorage = DataDeserializer.deserializeBoc(buffer);
+  let abi = [
+    {
+      type: "dict",
+      keys: { type: "uint", length: 8 },
+      value: { type: "slice" }
+    },
+    {
+      type: "dict",
+      keys: { type: "uint", length: 8 },
+      value: { type: "slice" }
+    },
+    {
+      type: "dict",
+      keys: { type: "uint", length: 8 },
+      value: { type: "slice" }
+    },
+    {
+      type: "grams"
+    }
+  ];
+
+  console.log(DataDeserializer.deserializeData(contractStorage.data, 0, abi));
   let dataBinary = buffer.reduce((binStr, el) => {
     return binStr + el.toString(2).padStart(8, "0");
   }, "");
