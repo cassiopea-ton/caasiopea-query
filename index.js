@@ -5,7 +5,7 @@ let abi = [
   {
     type: "dict",
     key: { type: "uint", size: 8 },
-    value: { type: "ref", body: {} }
+    value: [{ type: "ref", body: [] }]
   }
 ];
 

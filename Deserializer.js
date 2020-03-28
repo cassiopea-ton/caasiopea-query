@@ -53,11 +53,11 @@ class CellData {
     this.refOffset = 0;
   }
 
-  readBits(data, counter) {
+  readBits(counter) {
     let byteStart = Math.floor(this.offset / 8);
     let length = Math.ceil(counter / 8);
     let bitStart = this.offset - byteStart * 8;
-    let dataSlice = data.readUIntBE(byteStart, length);
+    let dataSlice = this.data.readUIntBE(byteStart, length);
     let mask = 0;
     for (let i = 0; i < counter; i++) {
       mask |= 1 << (length * 8 - 1 - bitStart - i);
@@ -74,18 +74,60 @@ class CellData {
     return dataSlice;
   }
 
-  readUint(data, counter) {
-    let sign = this.readBits(data, 1) ? -1 : 1;
-    let int = this.readBits(data, counter - 1);
+  static setBits(dataSlice, bit, counter) {
+    for (let i = 0; i < counter; i++) {
+      dataSlice |= bit << i;
+    }
+    return dataSlice;
+  }
+
+  readUint(counter) {
+    let sign = this.readBits(this.data, 1) ? -1 : 1;
+    let int = this.readBits(this.data, counter - 1);
     if (sign === -1) {
       int = CellData.toggleBits(int, counter - 1) + 1;
     }
     return sign * int;
   }
-  readDict(cell, keyLength) {
-    let dict = {};
-    console.log(cell);
-    return dict;
+
+  readLabel(maxKeyLength) {
+    let labelLength = 0;
+    let label = 0;
+    if (!this.readBits(1)) {
+      // short
+      console.log("SHORT");
+      while (this.readBits(1)) {
+        labelLength++;
+      }
+      label = DataDeserializer.readBits(labelLength);
+    } else if (!this.readBits(1)) {
+      // long
+      console.log("LONG");
+      labelLength = this.readBits(Math.ceil(Math.log2(maxKeyLength + 1)));
+      label = DataDeserializer.readBits(labelLength);
+    } else {
+      // same
+      console.log("SAME");
+      let bit = this.readBits(1);
+      labelLength = this.readBits(Math.ceil(Math.log2(maxKeyLength + 1)));
+      label = CellData.setBits(0, bit, labelLength);
+    }
+    return [labelLength, label];
+  }
+
+  readNode(keyLength, valueAbi) {
+    if (!keyLength) {
+      return { value: this.deserialize(valueAbi), leaf: true };
+    }
+    let left = this.readEdge(keyLength - 1, valueAbi);
+    let right = this.readEdge(keyLength - 1, valueAbi);
+    return { value: { 0: left, 1: right }, leaf: false };
+  }
+
+  readEdge(keyLength, valueAbi) {
+    let labelInfo = this.readLabel(keyLength);
+    let nodeInfo = this.readNode(keyLength - labelInfo[0], valueAbi);
+    return { [labelInfo[1]]: nodeInfo };
   }
 
   deserialize(abi) {
@@ -93,23 +135,31 @@ class CellData {
     abi.forEach(item => {
       switch (item.type) {
         case "ref":
+          result.push(this.references[this.refOffset++].deserialize(item.body));
           break;
         case "uint":
-          result.push(this.readUint(this.data, item.size));
+          result.push(this.readUint(item.size));
           break;
         case "int":
         case "bits":
-          result.push(this.readBits(this.data, item.size));
+          result.push(this.readBits(item.size));
           break;
         case "grams":
           break;
         case "op_ref":
+          if (this.readBits(1)) {
+            result.push(
+              this.references[this.refOffset++].deserialize(item.body)
+            );
+          } else {
+            result.push({});
+          }
           break;
         case "dict":
-          if (this.readBits(this.data, 1)) {
-            let dict = this.readDict(
-              this.references[this.refOffset],
-              item.key.size
+          if (this.readBits(1)) {
+            let dict = this.references[this.refOffset++].readEdge(
+              item.key.size,
+              item.value
             );
             result.push(dict);
           } else {
