@@ -5,7 +5,18 @@ let abi = [
   {
     type: "dict",
     key: { type: "uint", size: 8 },
-    value: [{ type: "ref", body: [] }]
+    value: [
+      {
+        type: "prxdict",
+        key: { type: "string", size: 1023 },
+        value: [
+          { type: "uint", size: 256 },
+          { type: "uint", size: 32 },
+          { type: "grams" },
+          { type: "uint", size: 32 }
+        ]
+      }
+    ]
   }
 ];
 
@@ -44,59 +55,6 @@ class QueryClient {
     );
   }
 }
-class DataDeserializer {
-  static deserializeDict(dictData, data, keyLength) {
-    let bitOffset = 0;
-    let dict = {};
-    let b,
-      label,
-      nodeLength = keyLength,
-      labelLength = 0;
-    let referencesOffset = 0;
-    // readLabel
-    if (!DataDeserializer.readBits(dictData.data, bitOffset++, 1)) {
-      // short
-      while (DataDeserializer.readBits(dictData.data, bitOffset++, 1)) {
-        labelLength++;
-      }
-      label = DataDeserializer.readBits(dictData.data, bitOffset, labelLength);
-      bitOffset += labelLength;
-    } else if (DataDeserializer.readBits(dictData.data, bitOffset++, 1)) {
-      // same
-      b = DataDeserializer.readBits(dictData.data, bitOffset++, 1);
-      labelLength = DataDeserializer.readBits(
-        dictData.data,
-        bitOffset,
-        Math.ceil(Math.log2(nodeLength + 1))
-      );
-      bitOffset += Math.ceil(Math.log2(nodeLength + 1));
-      label = 0;
-      for (let i = 0; i < labelLength; i++) {
-        label |= b << (labelLength - 1 - i);
-      }
-    } else {
-      // long
-      labelLength = DataDeserializer.readBits(
-        dictData.data,
-        bitOffset,
-        Math.ceil(Math.log2(nodeLength + 1))
-      );
-      bitOffset += Math.ceil(Math.log2(nodeLength + 1));
-      label = DataDeserializer.readBits(dictData.data, bitOffset, labelLength);
-      bitOffset += labelLength;
-    }
-    nodeLength -= labelLength;
-    if (!nodeLength) {
-      if (DataDeserializer.readBits(dictData.data, bitOffset++, 1)) {
-        dict[label] = data[dictData.references[referencesOffset++]];
-      }
-    }
-    console.log(label, "\n", labelLength, "\n");
-    // readNode
-
-    return dict;
-  }
-}
 
 async function main(client) {
   let registerAddr =
@@ -114,7 +72,7 @@ async function main(client) {
     });
   }
   let c = new BagOfCells(buffer);
-  console.log(c.cell_data_slice[0].deserialize(abi));
+  console.log(JSON.stringify(c.cell_data_slice[0].deserialize(abi)));
 
   let dataBinary = buffer.reduce((binStr, el) => {
     return binStr + el.toString(2).padStart(8, "0");
