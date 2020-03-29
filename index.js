@@ -10,10 +10,11 @@ let abi = [
         type: "prxdict",
         key: { type: "string", size: 1023 },
         value: [
+          { type: "int", size: 8 },
           { type: "uint", size: 256 },
           { type: "uint", size: 32 },
-          { type: "grams" },
-          { type: "uint", size: 32 }
+          { type: "grams" }
+          // { type: "uint", size: 32 }
         ]
       }
     ]

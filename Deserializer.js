@@ -1,37 +1,9 @@
-// {
-//      "type": "ref",
-//      "body": { ... }
-// }
-
-// {
-//      "type": "op_ref",
-//      "body": { ... }
-// }
-
-// {
-//      "type": "int",
-//      "size": uint
-// }
-
-// {
-//      "type": "uint",
-//      "size": uint
-// }
-
-// {
-//      "type": "bits",
-//      "size": uint
-// }
-
-// {
-//      "type": "grams"
-// }
-
-// {
-//      "type": "dict",
-//      "key": { ... },
-//      "value": { ... },
-// }
+const {
+  toBigIntBE,
+  toBigIntLE,
+  toBufferBE,
+  toBufferLE
+} = require("bigint-buffer");
 
 class CellData {
   constructor(data, references) {
@@ -43,22 +15,23 @@ class CellData {
 
   readBits(counter) {
     let byteStart = Math.floor(this.offset / 8);
-    let length = Math.ceil(counter / 8);
+    let length = Math.ceil(((this.offset % 8) + counter) / 8);
     let bitStart = this.offset - byteStart * 8;
     let dataSlice = this.data.readUIntBE(byteStart, length);
     let mask = 0;
     for (let i = 0; i < counter; i++) {
-      mask |= 1 << (length * 8 - 1 - bitStart - i);
+      mask |= dataSlice & (1 << (length * 8 - 1 - bitStart - i));
     }
     this.offset += counter;
     let padding = 8 - ((bitStart + counter) % 8);
-    return padding === 8 ? dataSlice & mask : (dataSlice & mask) >> padding;
+    return padding === 8 ? mask : mask >> padding;
   }
 
   readLongBits(counter) {
     let length = Math.ceil(counter / 8);
     let result = [];
     for (let l = 0; l < counter; l += 8) {
+      length--;
       result.push(length ? this.readBits(8) : this.readBits(counter - l));
     }
     return Buffer.from(result);
@@ -81,6 +54,20 @@ class CellData {
     return dataSlice;
   }
 
+  static toggleLongBits(dataSlice, counter) {
+    let length = Math.ceil(counter / 8);
+    let result = [];
+    for (let l = 0; l < counter; l += 8) {
+      result.push(
+        length + 1 != Math.ceil(counter / 8)
+          ? this.toggleBits(dataSlice[length], 8)
+          : this.toggleBits(dataSlice[length], counter - l)
+      );
+      length++;
+    }
+    return Buffer.from(result);
+  }
+
   static setBits(dataSlice, bit, counter) {
     for (let i = 0; i < counter; i++) {
       dataSlice |= bit << i;
@@ -88,23 +75,23 @@ class CellData {
     return dataSlice;
   }
 
-  readUint(counter) {
-    let sign = this.readBits(1) ? -1 : 1;
-    let int = this.readLongBits(counter - 1);
+  readInt(counter) {
+    // let sign = this.readBits(1) ? -1 : 1;
+    let int = this.readLongBits(counter);
     if (sign === -1) {
-      int = CellData.toggleBits(int, counter - 1) + 1;
+      int = toBigIntBE(CellData.toggleLongBits(toBigIntBE(int) - BigInt(1)));
     }
-    return sign * int;
+    return int.toString();
   }
 
   readVarUInt(counter) {
     let size = this.readBits(Math.floor(Math.log2(counter + 1)));
-    return size ? this.readUint(size * 8) : 0;
+    return size ? this.readBits(size * 8) : 0;
   }
 
   readVarInt(counter) {
     let size = this.readBits(Math.floor(Math.log2(counter + 1)));
-    return size ? this.readBits(size * 8) : 0;
+    return size ? this.readInt(size * 8) : 0;
   }
 
   readLabel(maxKeyLength) {
@@ -119,7 +106,10 @@ class CellData {
     } else if (!this.readBits(1)) {
       console.log("LONG");
       labelLength = this.readBits(Math.ceil(Math.log2(maxKeyLength + 1)));
+      console.log(labelLength);
+      console.log(this.offset);
       label = this.readLongBits(labelLength);
+      console.log(this.offset);
     } else {
       console.log("SAME");
       let bit = this.readBits(1);
@@ -131,14 +121,13 @@ class CellData {
 
   readVarNode(keyLength, valueAbi) {
     if (this.readBits(1)) {
-      console.log(this);
-    } else if (this.readBits(1)) {
-      let left = this.references[this.refOffset++]
+      let left = this.references[this.refOffset]
         ? this.references[this.refOffset++].readVarEdge(keyLength - 1, valueAbi)
         : {};
-      let right = this.references[this.refOffset++]
+      let right = this.references[this.refOffset]
         ? this.references[this.refOffset++].readVarEdge(keyLength - 1, valueAbi)
         : {};
+      console.log(this.offset);
       let value = this.readBits(1) ? this.deserialize(valueAbi) : null;
       return { value: { 0: left, 1: right, value }, leaf: false };
     } else {
@@ -176,17 +165,22 @@ class CellData {
 
   deserialize(abi) {
     let result = [];
+    // console.log(this.offset);
     abi.forEach(item => {
+      //   console.log(this.offset);
       switch (item.type) {
         case "ref":
           result.push(this.references[this.refOffset++].deserialize(item.body));
           break;
         case "uint":
-          result.push(this.readUint(item.size));
+          result.push(toBigIntBE(this.readLongBits(item.size)).toString());
           break;
         case "int":
+          console.log(this.offset);
+          result.push(toBigIntBE(this.readLongBits(item.size)).toString());
+          break;
         case "bits":
-          result.push(this.readBits(item.size));
+          result.push(this.readLongBits(item.size));
           break;
         case "grams":
           result.push(this.readVarUInt(16));
@@ -223,6 +217,7 @@ class CellData {
           }
           break;
       }
+      console.log(item);
     });
     return result;
   }
