@@ -76,7 +76,6 @@ class CellData {
   }
 
   readInt(counter) {
-    // let sign = this.readBits(1) ? -1 : 1;
     let int = this.readLongBits(counter);
     if (sign === -1) {
       int = toBigIntBE(CellData.toggleLongBits(toBigIntBE(int) - BigInt(1)));
@@ -97,77 +96,101 @@ class CellData {
   readLabel(maxKeyLength) {
     let labelLength = 0;
     let label = 0;
+    let labelLengthSize = Math.ceil(Math.log2(maxKeyLength + 1));
+    let labelLengthBytes = Math.ceil(labelLengthSize / 8);
     if (!this.readBits(1)) {
-      console.log("SHORT");
       while (this.readBits(1)) {
         labelLength++;
       }
       label = this.readLongBits(labelLength);
     } else if (!this.readBits(1)) {
-      console.log("LONG");
-      labelLength = this.readBits(Math.ceil(Math.log2(maxKeyLength + 1)));
-      console.log(labelLength);
-      console.log(this.offset);
+      labelLength = this.readBits(labelLengthSize);
       label = this.readLongBits(labelLength);
-      console.log(this.offset);
     } else {
-      console.log("SAME");
       let bit = this.readBits(1);
       labelLength = this.readBits(Math.ceil(Math.log2(maxKeyLength + 1)));
       label = CellData.setLongBits(0, bit, labelLength);
     }
-    return [labelLength, label];
+    let bufferedLabelLength = Buffer.alloc(labelLengthBytes);
+    bufferedLabelLength.writeUIntBE(labelLength, 0, labelLengthBytes);
+    return [
+      toBigIntBE(bufferedLabelLength),
+      labelLength <= 8
+        ? toBigIntBE(label)
+        : toBigIntBE(label) >>
+          BigInt(Math.ceil(labelLength / 8) * 8 - labelLength)
+    ];
   }
 
-  readVarNode(keyLength, valueAbi) {
+  readVarNode(keyLength, valueAbi, label, finalizedDict) {
     if (this.readBits(1)) {
-      let left = this.references[this.refOffset]
-        ? this.references[this.refOffset++].readVarEdge(keyLength - 1, valueAbi)
-        : {};
-      let right = this.references[this.refOffset]
-        ? this.references[this.refOffset++].readVarEdge(keyLength - 1, valueAbi)
-        : {};
-      console.log(this.offset);
-      let value = this.readBits(1) ? this.deserialize(valueAbi) : null;
-      return { value: { 0: left, 1: right, value }, leaf: false };
+      this.references[this.refOffset++].readVarEdge(
+        keyLength - 1,
+        valueAbi,
+        label << CellData.convertToBigInt(1),
+        finalizedDict
+      );
+      this.references[this.refOffset++].readVarEdge(
+        keyLength - 1,
+        valueAbi,
+        (label << CellData.convertToBigInt(1)) + CellData.convertToBigInt(1),
+        finalizedDict
+      );
     } else {
-      return { value: this.deserialize(valueAbi), leaf: true };
+      finalizedDict[label] = this.deserialize(valueAbi);
     }
   }
 
-  readNode(keyLength, valueAbi) {
+  static convertToBigInt(number) {
+    return BigInt(number);
+  }
+
+  readNode(keyLength, valueAbi, label, finalizedDict) {
     if (!keyLength) {
-      return { value: this.deserialize(valueAbi), leaf: true };
+      finalizedDict[label] = this.deserialize(valueAbi);
+    } else {
+      this.references[this.refOffset++].readEdge(
+        keyLength - 1,
+        valueAbi,
+        label << CellData.convertToBigInt(1),
+        finalizedDict
+      );
+      this.references[this.refOffset++].readEdge(
+        keyLength - 1,
+        valueAbi,
+        (label << CellData.convertToBigInt(1)) + CellData.convertToBigInt(1),
+        finalizedDict
+      );
     }
-    let left = this.references[this.refOffset++].readEdge(
-      keyLength - 1,
-      valueAbi
-    );
-    let right = this.references[this.refOffset++].readEdge(
-      keyLength - 1,
-      valueAbi
-    );
-    return { value: { 0: left, 1: right }, leaf: false };
   }
 
-  readEdge(keyLength, valueAbi) {
+  readEdge(keyLength, valueAbi, label, finalizedDict) {
     let labelInfo = this.readLabel(keyLength);
-
-    let nodeInfo = this.readNode(keyLength - labelInfo[0], valueAbi);
-    return { [labelInfo[1]]: nodeInfo };
+    label = (label << labelInfo[0]) + labelInfo[1];
+    this.readNode(
+      keyLength - parseInt(labelInfo[0]),
+      valueAbi,
+      label,
+      finalizedDict
+    );
+    return finalizedDict;
   }
 
-  readVarEdge(keyLength, valueAbi) {
+  readVarEdge(keyLength, valueAbi, label, finalizedDict) {
     let labelInfo = this.readLabel(keyLength);
-    let nodeInfo = this.readVarNode(keyLength - labelInfo[0], valueAbi);
-    return { [labelInfo[1]]: nodeInfo };
+    label = (label << labelInfo[0]) + labelInfo[1];
+    this.readVarNode(
+      keyLength - parseInt(labelInfo[0]),
+      valueAbi,
+      label,
+      finalizedDict
+    );
+    return finalizedDict;
   }
 
   deserialize(abi) {
     let result = [];
-    // console.log(this.offset);
     abi.forEach(item => {
-      //   console.log(this.offset);
       switch (item.type) {
         case "ref":
           result.push(this.references[this.refOffset++].deserialize(item.body));
@@ -176,7 +199,6 @@ class CellData {
           result.push(toBigIntBE(this.readLongBits(item.size)).toString());
           break;
         case "int":
-          console.log(this.offset);
           result.push(toBigIntBE(this.readLongBits(item.size)).toString());
           break;
         case "bits":
@@ -198,9 +220,21 @@ class CellData {
           if (this.readBits(1)) {
             let dict = this.references[this.refOffset++].readEdge(
               item.key.size,
-              item.value
+              item.value,
+              toBigIntBE(Buffer.from("")),
+              {}
             );
-            result.push(dict);
+            let prettifiedDict = {};
+            Object.entries(dict).forEach(([key, value]) => {
+              switch (item.key.type) {
+                case "string":
+                  prettifiedDict[key] = toBufferBE(value).toString();
+                  break;
+                default:
+                  prettifiedDict[key] = value;
+              }
+            });
+            result.push(prettifiedDict);
           } else {
             result.push({});
           }
@@ -209,15 +243,31 @@ class CellData {
           if (this.readBits(1)) {
             let dict = this.references[this.refOffset++].readVarEdge(
               item.key.size,
-              item.value
+              item.value,
+              toBigIntBE(Buffer.from("")),
+              {}
             );
-            result.push(dict);
+            let prettifiedDict = {};
+            Object.entries(dict).forEach(([key, value]) => {
+              switch (item.key.type) {
+                case "string":
+                  prettifiedDict[
+                    toBufferBE(
+                      BigInt(key),
+                      Math.ceil(BigInt(key).toString(16).length / 2)
+                    ).toString("utf8")
+                  ] = value;
+                  break;
+                default:
+                  prettifiedDict[key] = value;
+              }
+            });
+            result.push(prettifiedDict);
           } else {
             result.push({});
           }
           break;
       }
-      console.log(item);
     });
     return result;
   }

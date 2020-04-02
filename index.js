@@ -13,8 +13,8 @@ let abi = [
           { type: "int", size: 8 },
           { type: "uint", size: 256 },
           { type: "uint", size: 32 },
-          { type: "grams" }
-          // { type: "uint", size: 32 }
+          { type: "grams" },
+          { type: "uint", size: 32 }
         ]
       }
     ]
@@ -59,12 +59,11 @@ class QueryClient {
 
 async function main(client) {
   let registerAddr =
-    "-1:20609b46cd4fe654b72f8ecddde986f6484dc13e737fd109b36ca73b77b6a098";
+    "-1:441c478f14f86140604578eabdac3531471273f7e8dbc826e309e9d8b328a1d9";
   let queryClient = new QueryClient(client);
   const account = await queryClient.getAccount(registerAddr);
 
   const buffer = Buffer.from(account[0].data, "base64");
-  // let contractStorage = DataDeserializer.deserializeBoc(buffer);
   let testAbi = [];
   for (let i = 0; i < 1; i++) {
     testAbi.push({
