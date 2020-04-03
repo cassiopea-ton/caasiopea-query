@@ -99,7 +99,7 @@ async function main(client) {
   let c = new BagOfCells(buffer);
 
   // Deserialize root cell in storage
-  console.log(JSON.stringify(c.cell_data_slice[0].deserialize(abi)));
+  console.log(JSON.stringify(c.cellDataSlice[0].deserialize(abi)));
 }
 
 (async () => {
