@@ -269,22 +269,22 @@ class CellData {
 }
 
 class Cell {
-  constructor(data, offsetObj, ref_size) {
+  constructor(data, offsetObj, refSize) {
     let offset = offsetObj.offset;
-    this.refs_counter = data[offset] & 7;
-    this.is_exotic = data[offset] & 8;
-    this.has_hash = data[offset] & 16;
+    this.refsCounter = data[offset] & 7;
+    this.isExotic = data[offset] & 8;
+    this.hasHash = data[offset] & 16;
     this.level = data[offset++] & (3 << 5);
 
-    this.data_size = (data[offset] >> 1) + (data[offset] & 1);
-    this.not_full = data[offset++] & 1;
-    this.full_data_size = 2 + this.data_size + this.refs_counter * ref_size;
+    this.dataSize = (data[offset] >> 1) + (data[offset] & 1);
+    this.notFull = data[offset++] & 1;
+    this.fullDataSize = 2 + this.dataSize + this.refsCounter * refSize;
 
-    this.data = data.slice(offset, (offset += this.data_size));
+    this.data = data.slice(offset, (offset += this.dataSize));
     this.references = [];
-    for (let ref = 0; ref < this.refs_counter; ref++) {
-      this.references.push(data.readUIntBE(offset, ref_size));
-      offset += ref_size;
+    for (let ref = 0; ref < this.refsCounter; ref++) {
+      this.references.push(data.readUIntBE(offset, refSize));
+      offset += refSize;
     }
     offsetObj.offset = offset;
   }
@@ -296,71 +296,71 @@ class BagOfCells {
     this.magic = boc.readUIntBE(0, 4);
 
     let b = boc[4];
-    this.has_idx = b & (1 << 7);
-    this.has_crc32c = b & (1 << 6);
-    this.has_cache_bits = b & (1 << 5);
+    this.hasIdx = b & (1 << 7);
+    this.hasCrc32c = b & (1 << 6);
+    this.hasCacheBits = b & (1 << 5);
     this.flags = b & (3 << 3);
-    this.ref_size = b & 7;
-    this.off_bytes = boc[5];
+    this.refSize = b & 7;
+    this.offBytes = boc[5];
 
     let offset = 6;
-    this.cells = boc.readUIntBE(offset, this.ref_size);
-    offset += this.ref_size;
+    this.cells = boc.readUIntBE(offset, this.refSize);
+    offset += this.refSize;
 
-    this.roots = boc.readUIntBE(offset, this.ref_size);
-    offset += this.ref_size;
+    this.roots = boc.readUIntBE(offset, this.refSize);
+    offset += this.refSize;
 
-    this.absent = boc.readUIntBE(offset, this.ref_size);
-    offset += this.ref_size;
+    this.absent = boc.readUIntBE(offset, this.refSize);
+    offset += this.refSize;
 
-    this.tot_cells_size = boc.readUIntBE(offset, this.off_bytes);
-    offset += this.off_bytes;
+    this.totCellsSize = boc.readUIntBE(offset, this.offBytes);
+    offset += this.offBytes;
 
-    this.root_list = boc.slice(offset, (offset += this.roots * this.ref_size));
+    this.rootList = boc.slice(offset, (offset += this.roots * this.refSize));
 
-    if (this.has_idx) {
-      this.index = boc.slice(offset, (offset += this.cells * this.off_bytes));
+    if (this.hasIdx) {
+      this.index = boc.slice(offset, (offset += this.cells * this.offBytes));
     }
 
     // manage cells
-    this.cell_data = [];
-    this.cell_data_slice = [];
-    for (let cell_idx = 0; cell_idx < this.cells; cell_idx++) {
+    this.cellData = [];
+    this.cellDataSlice = [];
+    for (let cellIdx = 0; cellIdx < this.cells; cellIdx++) {
       let offsetObj = { offset };
-      this.cell_data.push(
-        new Cell(boc, offsetObj, this.ref_size, cell_idx, this.cells)
+      this.cellData.push(
+        new Cell(boc, offsetObj, this.refSize, cellIdx, this.cells)
       );
-      this.cell_data_slice.push({
-        data: Buffer.from(this.cell_data[cell_idx].data),
-        references_data: []
+      this.cellDataSlice.push({
+        data: Buffer.from(this.cellData[cellIdx].data),
+        referencesData: []
       });
       offset = offsetObj.offset;
     }
 
-    // fucking muddle with refs
-    for (let cell_idx = this.cells - 1; cell_idx >= 0; cell_idx--) {
-      this.cell_data[cell_idx].references_data = [];
-      let references = this.cell_data[cell_idx].references;
+    for (let cellIdx = this.cells - 1; cellIdx >= 0; cellIdx--) {
+      this.cellData[cellIdx].referencesData = [];
+      let references = this.cellData[cellIdx].references;
       for (let ref = 0; ref < references.length; ref++) {
-        this.cell_data[cell_idx].references_data.push({
-          ...this.cell_data[references[ref]]
+        this.cellData[cellIdx].referencesData.push({
+          ...this.cellData[references[ref]]
         });
 
-        this.cell_data_slice[cell_idx].references_data.push(
-          this.cell_data_slice[references[ref]]
+        this.cellDataSlice[cellIdx].referencesData.push(
+          this.cellDataSlice[references[ref]]
         );
       }
-      this.cell_data_slice[cell_idx] = new CellData(
-        this.cell_data_slice[cell_idx].data,
-        this.cell_data_slice[cell_idx].references_data
+      this.cellDataSlice[cellIdx] = new CellData(
+        this.cellDataSlice[cellIdx].data,
+        this.cellDataSlice[cellIdx].referencesData
       );
     }
 
-    if (this.has_crc32c) {
+    if (this.hasCrc32c) {
       this.index = boc.readUIntBE(offset, 4);
     }
   }
 }
 
 module.exports.Cell = Cell;
+module.exports.CellData = CellData;
 module.exports.BagOfCells = BagOfCells;
