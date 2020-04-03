@@ -1,12 +1,8 @@
 {
-  "name": "cassiopea-query",
+  "name": "cassiopeia-ton-sdk",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {
-    "run": "node index.js"
-  },
   "dependencies": {
-    "bigint-buffer": "^1.1.5",
-    "ton-client-node-js": "^0.21.0"
+    "bigint-buffer": "^1.1.5"
   }
 }
