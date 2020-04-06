@@ -20,7 +20,7 @@ TON says that everything is Bag of Cells. The account data is Bag of Cell as wel
 let c = new BagOfCells(buffer);
 ```
 
-It returns hte object with that represents following fields:
+It returns еte object with following fields:
 
 ```
 {
